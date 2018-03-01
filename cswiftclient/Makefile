@@ -13,7 +13,7 @@ INCLUDEDIR?=/usr/include
 %.o: %.c $(DEPS)
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-all: libcswift.so.1.0.0 test parse
+all: libcswift.so.1.0.0 test
 
 libcswift.so.1.0.0: cswift.o socket.o
 	$(CC) -shared -fPIC -Wl,-soname,libcswift.so.1 -o libcswift.so.1.0.0 cswift.o socket.o $(LDFLAGS) -lc

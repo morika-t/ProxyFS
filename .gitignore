@@ -8,6 +8,8 @@
 *.o
 *.a
 *.so
+*.so.1
+*.so.1.0.0
 build/
 dist/
 
@@ -17,6 +19,7 @@ MountPoint0
 
 # specific binaries
 jrpcfs/test/client
+cswiftclient/test
 
 # Folders
 _obj

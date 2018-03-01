@@ -48,10 +48,12 @@ bench:
 	done
 
 c-build:
+	$(MAKE) -w -C cswiftclient
 	$(MAKE) -w -C jrpcclient all
 	$(MAKE) -w -C vfs
 
 c-clean:
+	$(MAKE) -w -C cswiftclient clean
 	$(MAKE) -w -C jrpcclient clean
 	$(MAKE) -w -C vfs clean
 
@@ -66,9 +68,11 @@ endif
 
 c-install-deb-builder:
 ifeq ($(distro),CentOS Linux)
+	$(MAKE) -w -C cswiftclient installcentos
 	$(MAKE) -w -C jrpcclient installcentos
 	$(MAKE) -w -C vfs installcentos
 else
+	$(MAKE) -w -C cswiftclient install
 	$(MAKE) -w -C jrpcclient install
 	$(MAKE) -w -C vfs install
 endif
