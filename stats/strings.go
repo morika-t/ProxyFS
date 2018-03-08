@@ -120,6 +120,7 @@ var (
 	DirSetsizeOps                     = "proxyfs.inode.directory.setsize.operations"
 	FileFlushOps                      = "proxyfs.inode.file.flush.operations"
 	LogSegCreateOps                   = "proxyfs.inode.file.log-segment.create.operations"
+	GetReadPlanOps                    = "proxyfs.fs.readplan.operations"
 	GcLogSegDeleteOps                 = "proxyfs.inode.garbage-collection.log-segment.delete.operations"
 	GcLogSegOps                       = "proxyfs.inode.garbage-collection.log-segment.operations"
 	DirDestroyOps                     = "proxyfs.inode.directory.destroy.operations"

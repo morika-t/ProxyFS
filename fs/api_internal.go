@@ -675,6 +675,70 @@ func (mS *mountStruct) Flock(userID inode.InodeUserID, groupID inode.InodeGroupI
 	return
 }
 
+func (mS *mountStruct) GetReadPlan(inodeNumber inode.InodeNumber, readRangeIn []ReadRangeIn, readRangeOut *[]inode.ReadPlanStep) (fileSize uint64, err error) {
+	mS.volStruct.validateVolumeRWMutex.RLock()
+	defer mS.volStruct.validateVolumeRWMutex.RUnlock()
+
+	volumeName := mS.volStruct.volumeName
+
+	inodeLock, err := mS.volStruct.initInodeLock(inodeNumber, nil)
+	if err != nil {
+		return
+	}
+	err = inodeLock.ReadLock()
+	if err != nil {
+		return
+	}
+	defer inodeLock.Unlock()
+
+	// Find file size
+	metadata, err := mS.volStruct.VolumeHandle.GetMetadata(inodeNumber)
+	if err != nil {
+		return
+	}
+	fileSize = metadata.Size
+
+	// If no ranges are given then get range of whole file.  Otherwise, get ranges.
+	if len(readRangeIn) == 0 {
+		// Get ReadPlan for file
+		volumeHandle, err1 := inode.FetchVolumeHandle(volumeName)
+		if err1 != nil {
+			err = err1
+			logger.ErrorWithError(err)
+			return
+		}
+		var offset uint64 = 0
+		tmpReadEnt, err1 := volumeHandle.GetReadPlan(inodeNumber, &offset, &fileSize)
+		if err1 != nil {
+			err = err1
+			return
+		}
+		appendReadPlanEntries(tmpReadEnt, readRangeOut)
+	} else {
+		volumeHandle, err1 := inode.FetchVolumeHandle(volumeName)
+		if err1 != nil {
+			err = err1
+			logger.ErrorWithError(err)
+			return
+		}
+
+		// Get ReadPlan for each range and append physical path ranges to result
+		for i := range readRangeIn {
+
+			// TODO - verify that range request is within file size
+			tmpReadEnt, err1 := volumeHandle.GetReadPlan(inodeNumber, readRangeIn[i].Offset, readRangeIn[i].Len)
+			if err1 != nil {
+				err = err1
+				return
+			}
+			appendReadPlanEntries(tmpReadEnt, readRangeOut)
+		}
+	}
+
+	stats.IncrementOperations(&stats.GetReadPlanOps)
+	return
+}
+
 func (mS *mountStruct) getstatHelper(inodeNumber inode.InodeNumber, callerID dlm.CallerID) (stat Stat, err error) {
 	lockID, err := mS.volStruct.makeLockID(inodeNumber)
 	if err != nil {

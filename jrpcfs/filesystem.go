@@ -923,6 +923,36 @@ func (s *Server) RpcFlush(in *FlushRequest, reply *Reply) (err error) {
 	return
 }
 
+// RpcGetReadPlan is used by jrpcclient to retrieve the read plan for a file so that
+// SMB can do GETs directly to Swift.
+func (s *Server) RpcGetReadPlan(in *GetReadPlanReq, reply *GetReadPlanReply) (err error) {
+	flog := logger.TraceEnter("in.", in)
+	defer func() { flog.TraceExitErr("reply.", err, reply) }()
+	defer func() { rpcEncodeError(&err) }() // Encode error for return by RPC
+
+	requestRecTime := time.Now()
+
+	var profiler = utils.NewProfilerIf(doProfiling, "getreadplan")
+	profiler.AddEventNow("before fs.GetReadPlan()")
+
+	mountHandle, err := lookupMountHandle(in.MountID)
+	reply.FileSize, err = mountHandle.GetReadPlan(inode.InodeNumber(in.InodeNumber), in.ReadEntsIn, &reply.ReadEntsOut)
+	profiler.AddEventNow("after fs.GetReadPlan()")
+	reply.RequestTimeSec = UnixSec(requestRecTime)
+	reply.RequestTimeNsec = UnixNanosec(requestRecTime)
+
+	replySendTime := time.Now()
+	reply.SendTimeSec = replySendTime.Unix()
+	reply.SendTimeNsec = (replySendTime.UnixNano() - (reply.SendTimeSec * int64(time.Second)))
+	profiler.Close()
+
+	if err != nil {
+		return err
+	}
+
+	return err
+}
+
 func (stat *StatStruct) fsStatToStatStruct(fsStat fs.Stat) {
 	stat.CRTimeNs = fsStat[fs.StatCRTime]
 	stat.CTimeNs = fsStat[fs.StatCTime]
