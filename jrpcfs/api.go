@@ -232,29 +232,6 @@ type FlockReply struct {
 	FlockPid    uint64
 }
 
-// GetReadPlanReply is the response object for RpcGetReadPlan
-type GetReadPlanReply struct {
-	FileSize        uint64               // size of the file, in bytes
-	ReadEntsOut     []inode.ReadPlanStep // object/length/offset triples where the data is found
-	LeaseId         string               // TODO - how used?????, need this?????
-	RequestTimeSec  int64
-	RequestTimeNsec int64
-	SendTimeSec     int64
-	SendTimeNsec    int64
-}
-
-// GetReadPlanReq is the request object for RpcGetReadPlan
-type GetReadPlanReq struct {
-	InodeHandle
-	SendTimeSec  int64
-	SendTimeNsec int64
-	// Ranges to be read from the inode. Note: these are
-	// offset/length pairs, not HTTP byte ranges; please remember
-	// to convert the values. To obtain a read plan for the entire
-	// object, leave ReadEntsIn empty.
-	ReadEntsIn []fs.ReadRangeIn
-}
-
 // InodeHandle is embedded in a number of the request objects.
 type InodeHandle struct {
 	MountID     uint64
@@ -393,6 +370,26 @@ type ReadRequest struct {
 // ReadReply is the reply object for RpcRead.
 type ReadReply struct {
 	Buf             []byte
+	RequestTimeSec  int64
+	RequestTimeNsec int64
+	SendTimeSec     int64
+	SendTimeNsec    int64
+}
+
+// ReadPlanRequest is the request object for RpcReadPlan
+type ReadPlanRequest struct {
+	InodeHandle
+	Offset       uint64
+	Length       uint64
+	SendTimeSec  int64
+	SendTimeNsec int64
+}
+
+// ReadPlanReply is the response object for RpcReadPlan
+type ReadPlanReply struct {
+	FileSize        uint64               // size of the file, in bytes
+	ReadEntsOut     []inode.ReadPlanStep // object/length/offset triples where the data is found
+	LeaseId         string
 	RequestTimeSec  int64
 	RequestTimeNsec int64
 	SendTimeSec     int64

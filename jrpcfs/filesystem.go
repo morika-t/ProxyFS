@@ -925,7 +925,7 @@ func (s *Server) RpcFlush(in *FlushRequest, reply *Reply) (err error) {
 
 // RpcGetReadPlan is used by jrpcclient to retrieve the read plan for a file so that
 // SMB can do GETs directly to Swift.
-func (s *Server) RpcGetReadPlan(in *GetReadPlanReq, reply *GetReadPlanReply) (err error) {
+func (s *Server) RpcReadPlan(in *ReadPlanRequest, reply *ReadPlanReply) (err error) {
 	flog := logger.TraceEnter("in.", in)
 	defer func() { flog.TraceExitErr("reply.", err, reply) }()
 	defer func() { rpcEncodeError(&err) }() // Encode error for return by RPC
@@ -935,9 +935,13 @@ func (s *Server) RpcGetReadPlan(in *GetReadPlanReq, reply *GetReadPlanReply) (er
 	var profiler = utils.NewProfilerIf(doProfiling, "getreadplan")
 	profiler.AddEventNow("before fs.GetReadPlan()")
 
+	readEnts := make([]fs.ReadRangeIn, 0)
+	step := fs.ReadRangeIn{Offset: &in.Offset, Len: &in.Length}
+	readEnts = append(readEnts, step)
+
 	mountHandle, err := lookupMountHandle(in.MountID)
-	reply.FileSize, err = mountHandle.GetReadPlan(inode.InodeNumber(in.InodeNumber), in.ReadEntsIn, &reply.ReadEntsOut)
-	profiler.AddEventNow("after fs.GetReadPlan()")
+	reply.FileSize, err = mountHandle.GetReadPlan(inode.InodeNumber(in.InodeNumber), readEnts, &reply.ReadEntsOut)
+	profiler.AddEventNow("after fs.ReadPlan()")
 	reply.RequestTimeSec = UnixSec(requestRecTime)
 	reply.RequestTimeNsec = UnixNanosec(requestRecTime)
 
