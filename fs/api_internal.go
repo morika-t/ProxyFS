@@ -2080,6 +2080,27 @@ func putObjectHelper(mS *mountStruct, vContainerName string, vObjectPath string,
 	return
 }
 
+// FsPutComplete is called by jrpcclient to tell proxyfsd that it has written the object
+// directly to Swift and has closed the CHUNKED PUT.  The inode layer can then commit
+// the change to headhunter, etc
+func (mS *mountStruct) FsPutComplete(fileInodeNumber inode.InodeNumber, physPath string, fileMap []FileOffObject) (err error) {
+	mS.volStruct.validateVolumeRWMutex.RLock()
+	defer mS.volStruct.validateVolumeRWMutex.RUnlock()
+
+	for _, e := range fileMap {
+		// TODO - last argument is patchOnly - have to figure out if we need it
+		// TODO - is this the correct way to pass file offset or should we calculate it?
+		err = mS.volStruct.VolumeHandle.Wrote(fileInodeNumber, e.FileOffset, physPath,
+			e.ObjectOffset, e.ObjectLength, false)
+		if err != nil {
+			logger.DebugfIDWithError(internalDebug, err, "mount.Wrote() fileInodeNumber: %v fileOffset: %v pOjectPaths: %v pObjectOffset: %v pObjectLengths: %v i: %v failed!",
+				fileInodeNumber, e.FileOffset, physPath, e.ObjectOffset, e.ObjectLength, false)
+			return
+		}
+	}
+	return
+}
+
 func (mS *mountStruct) MiddlewarePutComplete(vContainerName string, vObjectPath string, pObjectPaths []string, pObjectLengths []uint64, pObjectMetadata []byte) (mtime uint64, ctime uint64, fileInodeNumber inode.InodeNumber, numWrites uint64, err error) {
 	mS.volStruct.validateVolumeRWMutex.RLock()
 	defer mS.volStruct.validateVolumeRWMutex.RUnlock()

@@ -784,3 +784,25 @@ type ReleaseLeaseReq struct {
 	LeaseId string
 }
 type ReleaseLeaseReply struct{}
+
+// SmbPutLocationReq is the request object for RpcSmbPutLocation
+type SmbPutLocationReq struct {
+	MountID uint64
+}
+
+// SmbPutLocationReply is the response object for RpcSmbPutLocation
+type SmbPutLocationReply struct {
+	ObjectPath string
+}
+
+// SmbPutCompleteReply is the response object for RpcSmbPutComplete
+type SmbPutCompleteReply struct {
+}
+
+// SmbPutCompleteReq is the request object for RpcSmbPutComplete
+type SmbPutCompleteReq struct {
+	MountID          uint64
+	FileInodeNumber  inode.InodeNumber
+	ObjectPath       string
+	FileObjOffsetLen []fs.FileOffObject
+}

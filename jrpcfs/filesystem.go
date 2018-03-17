@@ -1955,52 +1955,56 @@ func (s *Server) RpcUnlinkPath(in *UnlinkPathRequest, reply *Reply) (err error) 
 	return
 }
 
-func (s *Server) RpcWrite(in *WriteRequest, reply *WriteReply) (err error) {
-	var size uint64
-
-	globals.gate.RLock()
-	defer globals.gate.RUnlock()
-
-	sendTime := time.Unix(in.SendTimeSec, in.SendTimeNsec)
-	requestRecTime := time.Now()
-	deliveryLatency := requestRecTime.Sub(sendTime)
-	deliveryLatencyUsec := deliveryLatency.Nanoseconds() / int64(time.Microsecond)
-	var flog logger.FuncCtx
-
-	if globals.dataPathLogging {
-
-		// log function enter and exit, without printing write buffer
-		flog = logger.TraceEnter("in.", in.InodeHandle,
-			"in.Offset:"+strconv.FormatUint(in.Offset, 10),
-			"in.Buf.size:"+strconv.Itoa(len(in.Buf)),
-			"in.SendTimeSec:"+strconv.FormatInt(in.SendTimeSec, 10),
-			"in.SendTimeNsec:"+strconv.FormatInt(in.SendTimeNsec, 10),
-			"in.ReceiveTimeSec:"+strconv.FormatInt(UnixSec(requestRecTime), 10),
-			"in.RecTimeNs:"+strconv.FormatInt(UnixNanosec(requestRecTime), 10),
-			"deliveryLatencyUsec:"+strconv.FormatInt(deliveryLatencyUsec, 10),
-		)
-	}
-
-	stopwatch := utils.NewStopwatch()
-	defer func() {
-		_ = stopwatch.Stop()
-		if globals.dataPathLogging {
-			flog.TraceExitErr("reply.", err, reply, "duration:"+stopwatch.ElapsedMsString())
-		}
-	}()
+// RpcSmbPutComplete is similar to RpcPutComplete.  However, RpcPutComplete() is
+// called by middleware and passes the account/container/object name whereas SMB
+// only has the mount ID, inode number and Swift object number.
+//
+// RpcSmbPutComplete() is used by jrpcclient to tell inode that we have completed doing PUT
+// CHUNKs to the Swift object number and it should update the B+tree of the object as
+// well as update HH.
+func (s *Server) RpcSmbPutComplete(in *SmbPutCompleteReq, reply *SmbPutCompleteReply) (err error) {
+	flog := logger.TraceEnter("in.", in)
+	defer func() { flog.TraceExitErr("reply.", err, reply) }()
 	defer func() { rpcEncodeError(&err) }() // Encode error for return by RPC
 
+	var profiler = utils.NewProfilerIf(doProfiling, "wrote")
+	profiler.AddEventNow("before fs.FsPutComplete()")
+
 	mountHandle, err := lookupMountHandle(in.MountID)
-	if nil == err {
-		size, err = mountHandle.Write(inode.InodeRootUserID, inode.InodeGroupID(0), nil, inode.InodeNumber(in.InodeNumber), in.Offset, in.Buf, nil)
-		reply.Size = uint64(size)
+	err = mountHandle.FsPutComplete(in.FileInodeNumber, in.ObjectPath, in.FileObjOffsetLen)
+	profiler.AddEventNow("after fs.FsPutComplete()")
+
+	profiler.Close()
+
+	if err != nil {
+		return err
 	}
 
-	reply.RequestTimeSec = UnixSec(requestRecTime)
-	reply.RequestTimeNsec = UnixNanosec(requestRecTime)
+	return err
+}
 
-	replySendTime := time.Now()
-	reply.SendTimeSec = UnixSec(replySendTime)
-	reply.SendTimeNsec = UnixNanosec(replySendTime)
-	return
+// RpcSmbPutLocation is similar to RpcPutLocation.  However, RpcPutLocation() is
+// called by middleware and passes the account/container/object name.
+//
+// RpcRpcSmbPutLocation() is used by jrpcclient to get a new object number from proxyfsd.
+// jrpcclient does not have the account/container/object name.  All it has is a mount ID.
+func (s *Server) RpcSmbPutLocation(in *SmbPutLocationReq, reply *SmbPutLocationReply) (err error) {
+	flog := logger.TraceEnter("in.", in)
+	defer func() { flog.TraceExitErr("reply.", err, reply) }()
+	defer func() { rpcEncodeError(&err) }() // Encode error for return by RPC
+
+	var profiler = utils.NewProfilerIf(doProfiling, "objectNumber")
+	profiler.AddEventNow("before fs.CallInodeToProvisionObject()")
+
+	mountHandle, err := lookupMountHandle(in.MountID)
+	reply.ObjectPath, err = mountHandle.CallInodeToProvisionObject()
+	profiler.AddEventNow("after fs.CallInodeToProvisionObject()")
+
+	profiler.Close()
+
+	if err != nil {
+		return err
+	}
+
+	return err
 }
