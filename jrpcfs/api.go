@@ -802,7 +802,7 @@ type SmbPutCompleteReply struct {
 // SmbPutCompleteReq is the request object for RpcSmbPutComplete
 type SmbPutCompleteReq struct {
 	MountID          uint64
-	FileInodeNumber  inode.InodeNumber
+	InodeNumber      inode.InodeNumber
 	ObjectPath       string
 	FileObjOffsetLen []fs.FileOffObject
 }

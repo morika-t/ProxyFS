@@ -1971,7 +1971,7 @@ func (s *Server) RpcSmbPutComplete(in *SmbPutCompleteReq, reply *SmbPutCompleteR
 	profiler.AddEventNow("before fs.FsPutComplete()")
 
 	mountHandle, err := lookupMountHandle(in.MountID)
-	err = mountHandle.FsPutComplete(in.FileInodeNumber, in.ObjectPath, in.FileObjOffsetLen)
+	err = mountHandle.FsPutComplete(in.InodeNumber, in.ObjectPath, in.FileObjOffsetLen)
 	profiler.AddEventNow("after fs.FsPutComplete()")
 
 	profiler.Close()
