@@ -16,6 +16,7 @@ import (
 	"github.com/swiftstack/ProxyFS/conf"
 	"github.com/swiftstack/ProxyFS/fs"
 	"github.com/swiftstack/ProxyFS/logger"
+	"github.com/swiftstack/ProxyFS/transitions"
 )
 
 const (
@@ -23,253 +24,132 @@ const (
 	retryGap             = 100 * time.Millisecond
 )
 
-type mountPointStruct struct {
-	mountPointName string
+type volumeStruct struct {
 	volumeName     string
+	mountPointName string
 	mounted        bool
 }
 
 type globalsStruct struct {
-	gate sync.RWMutex // SIGHUP triggered confMap change control
-	//                   API Requests RLock()/RUnlock
-	//                   SIGHUP confMap changes Lock()/Unlock()
-	whoAmI        string
-	mountPointMap map[string]*mountPointStruct // key == mountPointStruct.mountPointName
+	gate sync.RWMutex //                      API Requests RLock()/RUnlock()
+	//                                        confMap changes Lock()/Unlock()
+	volumeMap     map[string]*volumeStruct // key == volumeStruct.volumeName
+	mountPointMap map[string]*volumeStruct // key == volumeStruct.mountPointName
 }
 
 var globals globalsStruct
 
-func Up(confMap conf.ConfMap) (err error) {
-	var (
-		alreadyInMountPointMap bool
-		mountPoint             *mountPointStruct
-		mountPointName         string
-		primaryPeerNameList    []string
-		volumeList             []string
-		volumeName             string
-		volumeSectionName      string
-	)
+func init() {
+	transitions.Register("fuse", &globals)
+}
 
-	globals.mountPointMap = make(map[string]*mountPointStruct)
-
-	volumeList, err = confMap.FetchOptionValueStringSlice("FSGlobals", "VolumeList")
-	if nil != err {
-		return
-	}
-
-	globals.whoAmI, err = confMap.FetchOptionValueString("Cluster", "WhoAmI")
-	if nil != err {
-		return
-	}
-
-	// Look thru list of volumes and generate map of volumes to be mounted on
-	// the local node.
-	for _, volumeName = range volumeList {
-		volumeSectionName = "Volume:" + volumeName
-
-		primaryPeerNameList, err = confMap.FetchOptionValueStringSlice(volumeSectionName, "PrimaryPeer")
-		if nil != err {
-			return
-		}
-
-		if 0 == len(primaryPeerNameList) {
-			continue
-		} else if 1 == len(primaryPeerNameList) {
-			if globals.whoAmI == primaryPeerNameList[0] {
-				mountPointName, err = confMap.FetchOptionValueString(volumeSectionName, "FUSEMountPointName")
-				if nil != err {
-					return
-				}
-
-				_, alreadyInMountPointMap = globals.mountPointMap[mountPointName]
-				if alreadyInMountPointMap {
-					err = fmt.Errorf("MountPoint \"%v\" only allowed to be used by a single Volume", mountPointName)
-					return
-				}
-
-				mountPoint = &mountPointStruct{mountPointName: mountPointName, volumeName: volumeName, mounted: false}
-
-				globals.mountPointMap[mountPointName] = mountPoint
-			}
-		} else {
-			err = fmt.Errorf("Volume \"%v\" only allowed one PrimaryPeer", volumeName)
-			return
-		}
-	}
-
-	// If we reach here, we succeeded importing confMap.
-	// Now go and mount the volumes.
-	for _, mountPoint = range globals.mountPointMap {
-		err = performMount(mountPoint)
-		if nil != err {
-			return
-		}
-	}
+func (dummy *globalsStruct) Up(confMap conf.ConfMap) (err error) {
+	globals.volumeMap = make(map[string]*volumeStruct)
+	globals.mountPointMap = make(map[string]*volumeStruct)
 
 	err = nil
 	return
 }
 
-func PauseAndContract(confMap conf.ConfMap) (err error) {
+func (dummy *globalsStruct) VolumeGroupCreated(confMap conf.ConfMap, volumeGroupName string, activePeer string, virtualIPAddr string) (err error) {
+	return nil
+}
+func (dummy *globalsStruct) VolumeGroupMoved(confMap conf.ConfMap, volumeGroupName string, activePeer string, virtualIPAddr string) (err error) {
+	return nil
+}
+func (dummy *globalsStruct) VolumeGroupDestroyed(confMap conf.ConfMap, volumeGroupName string) (err error) {
+	return nil
+}
+func (dummy *globalsStruct) VolumeCreated(confMap conf.ConfMap, volumeName string, volumeGroupName string) (err error) {
+	return nil
+}
+func (dummy *globalsStruct) VolumeMoved(confMap conf.ConfMap, volumeName string, volumeGroupName string) (err error) {
+	return nil
+}
+func (dummy *globalsStruct) VolumeDestroyed(confMap conf.ConfMap, volumeName string) (err error) {
+	return nil
+}
+
+func (dummy *globalsStruct) ServeVolume(confMap conf.ConfMap, volumeName string) (err error) {
 	var (
-		mountPoint          *mountPointStruct
-		ok                  bool
-		primaryPeerNameList []string
-		removedVolumeMap    map[string]*mountPointStruct // key == volumeName
-		volumeList          []string
-		volumeName          string
-		whoAmI              string
+		volume *volumeStruct
 	)
 
-	whoAmI, err = confMap.FetchOptionValueString("Cluster", "WhoAmI")
-	if nil != err {
-		err = fmt.Errorf("confMap.FetchOptionValueString(\"Cluster\", \"WhoAmI\") failed: %v", err)
-		return
-	}
-	if whoAmI != globals.whoAmI {
-		err = fmt.Errorf("confMap change not allowed to alter [Cluster]WhoAmI")
-		return
+	volume = &volumeStruct{
+		volumeName: volumeName,
+		mounted:    false,
 	}
 
-	volumeList, err = confMap.FetchOptionValueStringSlice("FSGlobals", "VolumeList")
+	volume.mountPointName, err = confMap.FetchOptionValueString("Volume:"+volumeName, "FUSEMountPointName")
 	if nil != err {
-		err = fmt.Errorf("confMap.FetchOptionValueStringSlice(\"FSGlobals\", \"VolumeList\") failed: %v", err)
 		return
 	}
 
 	globals.gate.Lock()
 
-	removedVolumeMap = make(map[string]*mountPointStruct)
+	globals.volumeMap[volume.volumeName] = volume
+	globals.mountPointMap[volume.mountPointName] = volume
 
-	for _, mountPoint = range globals.mountPointMap {
-		removedVolumeMap[mountPoint.volumeName] = mountPoint
-	}
+	err = performMount(volume)
 
-	for _, volumeName = range volumeList {
-		_, ok = removedVolumeMap[volumeName]
-		if ok {
-			primaryPeerNameList, err = confMap.FetchOptionValueStringSlice("Volume:"+volumeName, "PrimaryPeer")
-			if nil != err {
-				return
-			}
+	globals.gate.Unlock()
 
-			if 0 == len(primaryPeerNameList) {
-				continue
-			} else if 1 == len(primaryPeerNameList) {
-				if globals.whoAmI == primaryPeerNameList[0] {
-					delete(removedVolumeMap, volumeName)
-				}
-			} else {
-				err = fmt.Errorf("Volume \"%v\" only allowed one PrimaryPeer", volumeName)
-				return
-			}
-		}
-	}
-
-	for volumeName, mountPoint = range removedVolumeMap {
-		if mountPoint.mounted {
-			err = fuselib.Unmount(mountPoint.mountPointName)
-			if nil == err {
-				logger.Infof("Unmounted %v", mountPoint.mountPointName)
-			} else {
-				lazyUnmountCmd := exec.Command("fusermount", "-uz", mountPoint.mountPointName)
-				err = lazyUnmountCmd.Run()
-				if nil == err {
-					logger.Infof("Lazily unmounted %v", mountPoint.mountPointName)
-				} else {
-					logger.Infof("Unable to lazily unmount %v - got err == %v", mountPoint.mountPointName, err)
-				}
-			}
-		}
-
-		delete(globals.mountPointMap, mountPoint.mountPointName)
-	}
-
-	err = nil
-	return
+	return // return err from performMount() sufficient
 }
 
-func ExpandAndResume(confMap conf.ConfMap) (err error) {
+func (dummy *globalsStruct) UnserveVolume(confMap conf.ConfMap, volumeName string) (err error) {
 	var (
-		mountPoint          *mountPointStruct
-		mountPointName      string
-		ok                  bool
-		primaryPeerNameList []string
-		volumeList          []string
-		volumeName          string
-		volumeSectionName   string
+		lazyUnmountCmd *exec.Cmd
+		ok             bool
+		volume         *volumeStruct
 	)
 
-	volumeList, err = confMap.FetchOptionValueStringSlice("FSGlobals", "VolumeList")
-	if nil != err {
-		err = fmt.Errorf("confMap.FetchOptionValueStringSlice(\"FSGlobals\", \"VolumeList\") failed: %v", err)
-		return
-	}
+	err = nil // default return
 
-	for _, volumeName = range volumeList {
-		volumeSectionName = "Volume:" + volumeName
+	globals.gate.Lock()
 
-		primaryPeerNameList, err = confMap.FetchOptionValueStringSlice(volumeSectionName, "PrimaryPeer")
-		if nil != err {
-			return
-		}
+	volume, ok = globals.volumeMap[volumeName]
 
-		if 0 == len(primaryPeerNameList) {
-			continue
-		} else if 1 == len(primaryPeerNameList) {
-			if globals.whoAmI == primaryPeerNameList[0] {
-				mountPointName, err = confMap.FetchOptionValueString(volumeSectionName, "FUSEMountPointName")
-				if nil != err {
-					return
-				}
-
-				_, ok = globals.mountPointMap[mountPointName]
-				if !ok {
-					mountPoint = &mountPointStruct{mountPointName: mountPointName, volumeName: volumeName, mounted: false}
-
-					globals.mountPointMap[mountPointName] = mountPoint
-
-					err = performMount(mountPoint)
-					if nil != err {
-						return
-					}
+	if ok {
+		if volume.mounted {
+			err = fuselib.Unmount(volume.mountPointName)
+			if nil == err {
+				logger.Infof("Unmounted %v", volume.mountPointName)
+			} else {
+				lazyUnmountCmd = exec.Command("fusermount", "-uz", volume.mountPointName)
+				err = lazyUnmountCmd.Run()
+				if nil == err {
+					logger.Infof("Lazily unmounted %v", volume.mountPointName)
+				} else {
+					logger.Infof("Unable to lazily unmount %v - got err == %v", volume.mountPointName, err)
 				}
 			}
-		} else {
-			err = fmt.Errorf("Volume \"%v\" only allowed one PrimaryPeer", volumeName)
-			return
 		}
+
+		delete(globals.volumeMap, volume.volumeName)
+		delete(globals.mountPointMap, volume.mountPointName)
 	}
 
 	globals.gate.Unlock()
 
-	err = nil
-	return
+	return // return err as set from above
 }
 
-func Down() (err error) {
-	var (
-		mountPoint     *mountPointStruct
-		mountPointName string
-	)
+func (dummy *globalsStruct) Signaled(confMap conf.ConfMap) (err error) {
+	return nil
+}
 
-	for mountPointName, mountPoint = range globals.mountPointMap {
-		if mountPoint.mounted {
-			err = fuselib.Unmount(mountPointName)
-			if nil == err {
-				logger.Infof("Unmounted %v", mountPointName)
-				break
-			}
-			lazyUnmountCmd := exec.Command("fusermount", "-uz", mountPointName)
-			err = lazyUnmountCmd.Run()
-			if nil == err {
-				logger.Infof("Lazily unmounted %v", mountPointName)
-			} else {
-				logger.Infof("Unable to lazily unmount %v - got err == %v", mountPointName, err)
-			}
-		}
+func (dummy *globalsStruct) Down(confMap conf.ConfMap) (err error) {
+	if 0 != len(globals.volumeMap) {
+		err = fmt.Errorf("fuse.Down() called with 0 != len(globals.volumeMap")
+		return
+	}
+	if 0 != len(globals.mountPointMap) {
+		err = fmt.Errorf("fuse.Down() called with 0 != len(globals.mountPointMap")
+		return
 	}
 
+	err = nil
 	return
 }
 
@@ -298,7 +178,7 @@ func fetchInodeDevice(path string) (missing bool, inodeDevice int64, err error) 
 	return
 }
 
-func performMount(mountPoint *mountPointStruct) (err error) {
+func performMount(volume *volumeStruct) (err error) {
 	var (
 		conn                          *fuselib.Conn
 		curRetryCount                 uint32
@@ -309,21 +189,21 @@ func performMount(mountPoint *mountPointStruct) (err error) {
 		mountPointDevice              int64
 	)
 
-	mountPoint.mounted = false
+	volume.mounted = false
 
-	missing, mountPointContainingDirDevice, err = fetchInodeDevice(path.Dir(mountPoint.mountPointName))
+	missing, mountPointContainingDirDevice, err = fetchInodeDevice(path.Dir(volume.mountPointName))
 	if nil != err {
 		return
 	}
 	if missing {
-		logger.Infof("Unable to serve %s.FUSEMountPoint == %s (mount point dir's parent does not exist)", mountPoint.volumeName, mountPoint.mountPointName)
+		logger.Infof("Unable to serve %s.FUSEMountPoint == %s (mount point dir's parent does not exist)", volume.volumeName, volume.mountPointName)
 		return
 	}
 
-	missing, mountPointDevice, err = fetchInodeDevice(mountPoint.mountPointName)
+	missing, mountPointDevice, err = fetchInodeDevice(volume.mountPointName)
 	if nil == err {
 		if missing {
-			logger.Infof("Unable to serve %s.FUSEMountPoint == %s (mount point dir does not exist)", mountPoint.volumeName, mountPoint.mountPointName)
+			logger.Infof("Unable to serve %s.FUSEMountPoint == %s (mount point dir does not exist)", volume.volumeName, volume.mountPointName)
 			return
 		}
 	}
@@ -331,7 +211,7 @@ func performMount(mountPoint *mountPointStruct) (err error) {
 	if (nil != err) || (mountPointDevice != mountPointContainingDirDevice) {
 		// Presumably, the mount point is (still) currently mounted, so attempt to unmount it first
 
-		lazyUnmountCmd = exec.Command("fusermount", "-uz", mountPoint.mountPointName)
+		lazyUnmountCmd = exec.Command("fusermount", "-uz", volume.mountPointName)
 		err = lazyUnmountCmd.Run()
 		if nil != err {
 			return
@@ -341,10 +221,10 @@ func performMount(mountPoint *mountPointStruct) (err error) {
 
 		for {
 			time.Sleep(retryGap) // Try again in a bit
-			missing, mountPointDevice, err = fetchInodeDevice(mountPoint.mountPointName)
+			missing, mountPointDevice, err = fetchInodeDevice(volume.mountPointName)
 			if nil == err {
 				if missing {
-					err = fmt.Errorf("Race condition: %s.FUSEMountPoint == %s disappeared [case 1]", mountPoint.volumeName, mountPoint.mountPointName)
+					err = fmt.Errorf("Race condition: %s.FUSEMountPoint == %s disappeared [case 1]", volume.volumeName, volume.mountPointName)
 					return
 				}
 				if mountPointDevice == mountPointContainingDirDevice {
@@ -353,28 +233,28 @@ func performMount(mountPoint *mountPointStruct) (err error) {
 			}
 			curRetryCount++
 			if curRetryCount >= maxRetryCount {
-				err = fmt.Errorf("MaxRetryCount exceeded for %s.FUSEMountPoint == %s [case 1]", mountPoint.volumeName, mountPoint.mountPointName)
+				err = fmt.Errorf("MaxRetryCount exceeded for %s.FUSEMountPoint == %s [case 1]", volume.volumeName, volume.mountPointName)
 				return
 			}
 		}
 	}
 
 	conn, err = fuselib.Mount(
-		mountPoint.mountPointName,
-		fuselib.FSName(mountPoint.mountPointName),
+		volume.mountPointName,
+		fuselib.FSName(volume.mountPointName),
 		fuselib.AllowOther(),
 		// OS X specific—
 		fuselib.LocalVolume(),
-		fuselib.VolumeName(mountPoint.mountPointName),
+		fuselib.VolumeName(volume.mountPointName),
 	)
 
 	if nil != err {
-		logger.WarnfWithError(err, "Couldn't mount %s.FUSEMountPoint == %s", mountPoint.volumeName, mountPoint.mountPointName)
+		logger.WarnfWithError(err, "Couldn't mount %s.FUSEMountPoint == %s", volume.volumeName, volume.mountPointName)
 		err = nil
 		return
 	}
 
-	mountHandle, err = fs.Mount(mountPoint.volumeName, fs.MountOptions(0))
+	mountHandle, err = fs.Mount(volume.volumeName, fs.MountOptions(0))
 	if nil != err {
 		return
 	}
@@ -394,7 +274,7 @@ func performMount(mountPoint *mountPointStruct) (err error) {
 	go func(mountPointName string, conn *fuselib.Conn) {
 		defer conn.Close()
 		fusefslib.Serve(conn, fs)
-	}(mountPoint.mountPointName, conn)
+	}(volume.mountPointName, conn)
 
 	// Wait for FUSE to mount the file system.   The "fs.wg.Done()" is in the
 	// Root() routine.
@@ -402,9 +282,9 @@ func performMount(mountPoint *mountPointStruct) (err error) {
 
 	// If we made it to here, all was ok
 
-	logger.Infof("Now serving %s.FUSEMountPoint == %s", mountPoint.volumeName, mountPoint.mountPointName)
+	logger.Infof("Now serving %s.FUSEMountPoint == %s", volume.volumeName, volume.mountPointName)
 
-	mountPoint.mounted = true
+	volume.mounted = true
 
 	err = nil
 	return

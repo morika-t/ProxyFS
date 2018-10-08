@@ -22,6 +22,7 @@ gopkgsubdirs = \
 	stats \
 	statslogger \
 	swiftclient \
+	transitions \
 	utils \
 	version
 
@@ -41,7 +42,21 @@ gobinsubdirs = \
 	proxyfsd/proxyfsd \
 	ramswift/ramswift
 
-uname := $(shell uname)
+uname = $(shell uname)
+
+# UNDO: Remove this redundant definition when gobinsubdirs are all buildable
+uname = UNDO
+
+# UNDO: Remove this redundant definition when above gobinsubdirs are all buildable
+gobinsubdirs = \
+	cleanproxyfs \
+	pfs-stress \
+	pfs-swift-load \
+	pfsconfjson \
+	pfsconfjsonpacked \
+	evtlog/pfsevtlogd \
+	mkproxyfs/mkproxyfs \
+	ramswift/ramswift
 
 ifeq ($(uname),Linux)
     distro := $(shell python -c "import platform; print platform.linux_distribution()[0]")

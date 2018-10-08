@@ -813,10 +813,13 @@ func (vS *volumeStruct) flushInodeNumbers(inodeNumbers []InodeNumber) (err error
 }
 
 func accountNameToVolumeName(accountName string) (volumeName string, ok bool) {
+	var (
+		volume *volumeStruct
+	)
+
 	globals.Lock()
 
-	volume, ok := globals.accountMap[accountName]
-
+	volume, ok = globals.accountMap[accountName]
 	if ok {
 		volumeName = volume.volumeName
 	}
@@ -827,12 +830,16 @@ func accountNameToVolumeName(accountName string) (volumeName string, ok bool) {
 }
 
 func volumeNameToActivePeerPrivateIPAddr(volumeName string) (activePeerPrivateIPAddr string, ok bool) {
+	var (
+		volume *volumeStruct
+	)
+
 	globals.Lock()
 
-	volume, ok := globals.volumeMap[volumeName]
+	volume, ok = globals.volumeMap[volumeName]
 
 	if ok {
-		activePeerPrivateIPAddr = volume.activePeerPrivateIPAddr
+		activePeerPrivateIPAddr = volume.volumeGroup.activePeerPrivateIPAddr
 	}
 
 	globals.Unlock()
@@ -856,8 +863,8 @@ func fetchVolumeHandle(volumeName string) (volumeHandle VolumeHandle, err error)
 	volume.Lock()         // REVIEW: Once Tracker https://www.pivotaltracker.com/story/show/133377567
 	defer volume.Unlock() //         is resolved, these two lines should be removed
 
-	if !volume.active {
-		err = fmt.Errorf("%s: volumeName \"%v\" not active", utils.GetFnName(), volumeName)
+	if !volume.served {
+		err = fmt.Errorf("%s: volumeName \"%v\" not served", utils.GetFnName(), volumeName)
 		err = blunder.AddError(err, blunder.NotActiveError)
 		return
 	}
@@ -887,7 +894,7 @@ func fetchVolumeHandle(volumeName string) (volumeHandle VolumeHandle, err error)
 }
 
 func (vS *volumeStruct) provisionPhysicalContainer(physicalContainerLayout *physicalContainerLayoutStruct) (err error) {
-	if 0 == (physicalContainerLayout.physicalContainerNameSliceLoopCount % physicalContainerLayout.physicalObjectCountMax) {
+	if 0 == (physicalContainerLayout.containerNameSliceLoopCount % physicalContainerLayout.maxObjectsPerContainer) {
 		// We need to provision a new PhysicalContainer in this PhysicalContainerLayout
 
 		physicalContainerNameSuffix, nonShadowingErr := vS.headhunterVolumeHandle.FetchNonce()
@@ -895,9 +902,9 @@ func (vS *volumeStruct) provisionPhysicalContainer(physicalContainerLayout *phys
 			return
 		}
 
-		newContainerName := fmt.Sprintf("%s%s", physicalContainerLayout.physicalContainerNamePrefix, utils.Uint64ToHexStr(physicalContainerNameSuffix))
+		newContainerName := fmt.Sprintf("%s%s", physicalContainerLayout.containerNamePrefix, utils.Uint64ToHexStr(physicalContainerNameSuffix))
 
-		storagePolicyHeaderValues := []string{vS.defaultPhysicalContainerLayout.physicalContainerStoragePolicy}
+		storagePolicyHeaderValues := []string{vS.defaultPhysicalContainerLayout.containerStoragePolicy}
 		newContainerHeaders := make(map[string][]string)
 		newContainerHeaders["X-Storage-Policy"] = storagePolicyHeaderValues
 
@@ -906,7 +913,7 @@ func (vS *volumeStruct) provisionPhysicalContainer(physicalContainerLayout *phys
 			return
 		}
 
-		physicalContainerLayout.physicalContainerNameSlice[physicalContainerLayout.physicalContainerNameSliceNextIndex] = newContainerName
+		physicalContainerLayout.containerNameSlice[physicalContainerLayout.containerNameSliceNextIndex] = newContainerName
 	}
 
 	err = nil
@@ -927,13 +934,13 @@ func (vS *volumeStruct) provisionObject() (containerName string, objectNumber ui
 		return
 	}
 
-	containerName = vS.defaultPhysicalContainerLayout.physicalContainerNameSlice[vS.defaultPhysicalContainerLayout.physicalContainerNameSliceNextIndex]
+	containerName = vS.defaultPhysicalContainerLayout.containerNameSlice[vS.defaultPhysicalContainerLayout.containerNameSliceNextIndex]
 
-	vS.defaultPhysicalContainerLayout.physicalContainerNameSliceNextIndex++
+	vS.defaultPhysicalContainerLayout.containerNameSliceNextIndex++
 
-	if vS.defaultPhysicalContainerLayout.physicalContainerNameSliceNextIndex == vS.defaultPhysicalContainerLayout.physicalContainerCountMax {
-		vS.defaultPhysicalContainerLayout.physicalContainerNameSliceNextIndex = 0
-		vS.defaultPhysicalContainerLayout.physicalContainerNameSliceLoopCount++
+	if vS.defaultPhysicalContainerLayout.containerNameSliceNextIndex == vS.defaultPhysicalContainerLayout.containersPerPeer {
+		vS.defaultPhysicalContainerLayout.containerNameSliceNextIndex = 0
+		vS.defaultPhysicalContainerLayout.containerNameSliceLoopCount++
 	}
 
 	vS.Unlock()
