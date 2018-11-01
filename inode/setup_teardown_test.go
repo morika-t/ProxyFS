@@ -118,8 +118,8 @@ func testSetup(t *testing.T, starvationMode bool) {
 		}
 	} else {
 		testConfUpdateStrings = []string{
-			"SwiftClient.ChunkedConnectionPoolSize=64",
-			"SwiftClient.NonChunkedConnectionPoolSize=32",
+			"SwiftClient.ChunkedConnectionPoolSize=256",
+			"SwiftClient.NonChunkedConnectionPoolSize=64",
 		}
 	}
 

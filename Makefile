@@ -42,11 +42,6 @@ gobinsubdirs = \
 	proxyfsd/proxyfsd \
 	ramswift/ramswift
 
-uname = $(shell uname)
-
-# UNDO: Remove this redundant definition when gobinsubdirs are all buildable
-uname = UNDO
-
 # UNDO: Remove this redundant definition when above gobinsubdirs are all buildable
 gobinsubdirs = \
 	cleanproxyfs \
@@ -56,7 +51,10 @@ gobinsubdirs = \
 	pfsconfjsonpacked \
 	evtlog/pfsevtlogd \
 	mkproxyfs/mkproxyfs \
+	proxyfsd/proxyfsd \
 	ramswift/ramswift
+
+uname = $(shell uname)
 
 ifeq ($(uname),Linux)
     distro := $(shell python -c "import platform; print platform.linux_distribution()[0]")

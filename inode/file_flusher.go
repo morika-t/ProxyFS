@@ -424,7 +424,7 @@ func (vS *volumeStruct) doSendChunk(fileInode *inMemoryInodeStruct, buf []byte) 
 
 	if (logSegmentOffset + uint64(len(buf))) >= fileInode.volume.maxFlushSize {
 		fileInode.Add(1)
-		go vS.inFlightLogSegmentFlusher(inFlightLogSegment)
+		go vS.inFlightLogSegmentFlusher(inFlightLogSegment, true)
 		// No need to wait for it to complete now... that's only in doFileInodeDataFlush()
 	}
 
@@ -444,7 +444,7 @@ func (vS *volumeStruct) doFileInodeDataFlush(fileInode *inMemoryInodeStruct) (er
 	if nil != fileInode.openLogSegment {
 		inFlightLogSegment = fileInode.openLogSegment
 		fileInode.Add(1)
-		go vS.inFlightLogSegmentFlusher(inFlightLogSegment)
+		go vS.inFlightLogSegmentFlusher(inFlightLogSegment, true)
 	}
 
 	fileInode.Unlock()
@@ -466,7 +466,7 @@ func (vS *volumeStruct) doFileInodeDataFlush(fileInode *inMemoryInodeStruct) (er
 	return
 }
 
-func (vS *volumeStruct) inFlightLogSegmentFlusher(inFlightLogSegment *inFlightLogSegmentStruct) {
+func (vS *volumeStruct) inFlightLogSegmentFlusher(inFlightLogSegment *inFlightLogSegmentStruct, doDone bool) {
 	var (
 		err       error
 		fileInode *inMemoryInodeStruct
@@ -483,7 +483,9 @@ func (vS *volumeStruct) inFlightLogSegmentFlusher(inFlightLogSegment *inFlightLo
 		// Either a Close() is already in progress or has already completed
 
 		fileInode.Unlock()
-		fileInode.Done()
+		if doDone {
+			fileInode.Done()
+		}
 		return
 	}
 
@@ -511,7 +513,9 @@ func (vS *volumeStruct) inFlightLogSegmentFlusher(inFlightLogSegment *inFlightLo
 
 	fileInode.Unlock()
 
-	inFlightLogSegment.fileInode.Done()
+	if doDone {
+		fileInode.Done()
+	}
 }
 
 func chunkedPutConnectionPoolStarvationCallback() {
@@ -535,11 +539,9 @@ func chunkedPutConnectionPoolStarvationCallback() {
 
 	globals.Unlock()
 
-	fileInode.Add(1)
-
 	// Call inFlightLogSegmentFlusher() synchronously because we only want to return when it completes
 	// and we don't want to call fileInode.Wait() as this would wait until all invocations of
 	// inFlightLogSegmentFlusher() for the fileInode have completed.
 
-	volume.inFlightLogSegmentFlusher(inFlightLogSegment)
+	volume.inFlightLogSegmentFlusher(inFlightLogSegment, false)
 }

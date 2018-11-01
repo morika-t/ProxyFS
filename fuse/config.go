@@ -33,6 +33,8 @@ type volumeStruct struct {
 type globalsStruct struct {
 	gate sync.RWMutex //                      API Requests RLock()/RUnlock()
 	//                                        confMap changes Lock()/Unlock()
+	//                                        Note: fuselib.Unmount() results in an Fsync() call on RootDir
+	//                                              Hence, no current confMap changes currently call Lock()
 	volumeMap     map[string]*volumeStruct // key == volumeStruct.volumeName
 	mountPointMap map[string]*volumeStruct // key == volumeStruct.mountPointName
 }
@@ -106,8 +108,6 @@ func (dummy *globalsStruct) UnserveVolume(confMap conf.ConfMap, volumeName strin
 
 	err = nil // default return
 
-	globals.gate.Lock()
-
 	volume, ok = globals.volumeMap[volumeName]
 
 	if ok {
@@ -129,8 +129,6 @@ func (dummy *globalsStruct) UnserveVolume(confMap conf.ConfMap, volumeName strin
 		delete(globals.volumeMap, volume.volumeName)
 		delete(globals.mountPointMap, volume.mountPointName)
 	}
-
-	globals.gate.Unlock()
 
 	return // return err as set from above
 }
